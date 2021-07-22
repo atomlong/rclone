@@ -219,14 +219,30 @@ jobs:
       - name: Deploy built binaries
         shell: bash
         run: |
+          export RCLONE_CONFIG=${PWD}/rclone.config
+          [ $(awk 'END{print NR}' <<< "${RCLONE_CONF}") == 1 ] &&
+          base64 --decode <<< "${RCLONE_CONF}" > ${RCLONE_CONFIG} ||
+          printf "${RCLONE_CONF}" > ${RCLONE_CONFIG}
           if [[ "${{ matrix.os }}" == "ubuntu-latest" ]]; then make release_dep_linux ; fi
           if [[ "${{ matrix.os }}" == "windows-latest" ]]; then make release_dep_windows ; fi
           make ci_beta
+          RCLONE_CONFIG_NEW=$(base64 ${RCLONE_CONFIG_PATH} | tr '\n' '\0')
+          echo ::set-output name=rclone_config::${RCLONE_CONFIG_NEW}
+          echo ::add-mask::${RCLONE_CONFIG_NEW}
         env:
-          RCLONE_CONFIG_PASS: ${{ secrets.RCLONE_CONFIG_PASS }}
+          RCLONE_CONF: ${{ secrets.RCLONE_CONF }}
         # working-directory: '$(modulePath)'
         # Deploy binaries if enabled in config && not a PR && not a fork
         if: matrix.deploy && github.head_ref == '' && github.repository == 'atomlong/rclone'
+        id: deploy
+        
+      - name: Update Rclone Config secret
+        uses: atomlong/gh-update-secret@master
+        if: ${{ steps.deploy.outputs.rclone_config != '' }}
+        with:
+          name: RCLONE_CONF
+          value: ${{ steps.deploy.outputs.rclone_config }}
+          pa_token: ${{ secrets.GH_PA_TOKEN }}
 
   android:
      if: ${{ github.repository == 'atomlong/rclone' || github.event.inputs.manual }}
@@ -274,7 +290,7 @@ jobs:
            env PATH=$PATH:~/go/bin gomobile init
            
        - name: arm-v7a gomobile build
-         run: env PATH=$PATH:~/go/bin gomobile bind -v -target=android/arm -javapkg=org.rclone -ldflags '-s -X github.com/atomlong/rclone/fs.Version='${VERSION} github.com/atomlong/rclone/librclone/gomobile 
+         run: env PATH=$PATH:~/go/bin gomobile bind -v -target=android/arm -javapkg=org.rclone -ldflags '-s -X github.com/rclone/rclone/fs.Version='${VERSION} github.com/rclone/rclone/librclone/gomobile 
            
        - name: arm-v7a Set environment variables
          shell: bash
@@ -330,8 +346,12 @@ jobs:
 
        - name: Upload artifacts
          run: |
+           export RCLONE_CONFIG=${PWD}/rclone.config
+           [ $(awk 'END{print NR}' <<< "${RCLONE_CONF}") == 1 ] &&
+           base64 --decode <<< "${RCLONE_CONF}" > ${RCLONE_CONFIG} ||
+           printf "${RCLONE_CONF}" > ${RCLONE_CONFIG}
            make ci_upload
          env:
-           RCLONE_CONFIG_PASS: ${{ secrets.RCLONE_CONFIG_PASS }}
+           RCLONE_CONF: ${{ secrets.RCLONE_CONF }}
          # Upload artifacts if not a PR && not a fork
          if: github.head_ref == '' && github.repository == 'atomlong/rclone'
